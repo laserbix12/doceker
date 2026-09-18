@@ -9,7 +9,7 @@ pipeline {
     }
 
     environment {
-        DOCKER_IMAGE = 'laserbix12/doceker'
+        DOCKER_IMAGE = 'michaell_pulido/doceker'
         IMAGE_TAG = "${env.BUILD_NUMBER}"
         DOCKER_CREDENTIALS_ID = 'docker-hub-credentials'
         CI_VENV = "/tmp/jenkins-venv-${env.BUILD_NUMBER}"
