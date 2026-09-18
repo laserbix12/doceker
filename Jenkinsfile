@@ -1,61 +1,81 @@
 pipeline {
     agent any
 
+    options {
+        skipDefaultCheckout(true)
+        timestamps()
+        disableConcurrentBuilds()
+        timeout(time: 15, unit: 'MINUTES')
+    }
+
     environment {
-        PYTHON_VERSION = '3.11'
-        IMAGE_NAME = 'api_test'
+        // El repositorio Docker coincide con el remoto Git configurado en este proyecto.
+        DOCKER_IMAGE = 'laserbix12/doceker'
         IMAGE_TAG = "${env.BUILD_NUMBER}"
+        DOCKER_CREDENTIALS_ID = 'dockerhub-credentials'
     }
 
     stages {
         stage('Checkout') {
             steps {
-                echo 'Clonando repositorio...'
-                checkout scm
+                echo 'Obteniendo el código de la rama main...'
+                git branch: 'main', url: 'https://github.com/laserbix12/doceker.git'
             }
         }
 
-        stage('Install dependencies') {
+        stage('Testing') {
+            agent {
+                docker {
+                    image 'python:3.11-slim'
+                    reuseNode true
+                }
+            }
             steps {
-                echo 'Instalando dependencias del proyecto...'
+                echo 'Instalando dependencias y ejecutando validaciones Django...'
                 sh '''
+                    set -eu
                     python --version
                     python -m pip install --upgrade pip
-                    python -m pip install -r requirements.txt
+                    python -m pip install --no-cache-dir -r requirements.txt
+                    python manage.py check
+                    python manage.py test
                 '''
             }
         }
 
-        stage('Run checks') {
+        stage('Build') {
             steps {
-                echo 'Validando la aplicación Django...'
-                sh 'python manage.py check'
-            }
-        }
-
-        stage('Run tests') {
-            steps {
-                echo 'Ejecutando pruebas...'
-                sh 'python manage.py test'
-            }
-        }
-
-        stage('Build Docker image') {
-            steps {
-                echo 'Construyendo imagen Docker...'
-                sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
-            }
-        }
-
-        stage('Deploy to Kubernetes') {
-            steps {
-                echo 'Desplegando en Kubernetes...'
+                echo "Construyendo ${DOCKER_IMAGE}:${IMAGE_TAG}..."
                 sh '''
-                    kubectl apply -f k8s/postgres-configmap.yaml
-                    kubectl apply -f k8s/postgres-secret.yaml
-                    kubectl apply -f k8s/backend-deployment.yaml
-                    kubectl apply -f k8s/backend-service.yaml
+                    set -eu
+                    docker build \
+                        --tag "${DOCKER_IMAGE}:${IMAGE_TAG}" \
+                        --tag "${DOCKER_IMAGE}:latest" \
+                        .
                 '''
+            }
+        }
+
+        stage('Push') {
+            steps {
+                echo 'Publicando la imagen en Docker Hub...'
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: "${DOCKER_CREDENTIALS_ID}",
+                        usernameVariable: 'DOCKER_USERNAME',
+                        passwordVariable: 'DOCKER_PASSWORD'
+                    )
+                ]) {
+                    sh '''
+                        set -eu
+                        trap 'docker logout >/dev/null 2>&1 || true' EXIT
+                        printf '%s' "${DOCKER_PASSWORD}" | docker login \
+                            --username "${DOCKER_USERNAME}" \
+                            --password-stdin
+                        docker push "${DOCKER_IMAGE}:${IMAGE_TAG}"
+                        docker push "${DOCKER_IMAGE}:latest"
+                    '''
+                }
             }
         }
     }
@@ -65,10 +85,10 @@ pipeline {
             echo 'Pipeline finalizado.'
         }
         success {
-            echo 'La pipeline se ejecutó correctamente.'
+            echo "Imagen publicada: ${DOCKER_IMAGE}:${IMAGE_TAG}"
         }
         failure {
-            echo 'La pipeline falló.'
+            echo 'La pipeline falló. Revisa los logs de la etapa indicada.'
         }
     }
 }
