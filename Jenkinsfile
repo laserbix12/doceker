@@ -9,36 +9,31 @@ pipeline {
     }
 
     environment {
-        // El repositorio Docker coincide con el remoto Git configurado en este proyecto.
         DOCKER_IMAGE = 'laserbix12/doceker'
         IMAGE_TAG = "${env.BUILD_NUMBER}"
-        DOCKER_CREDENTIALS_ID = 'dockerhub-credentials'
+        DOCKER_CREDENTIALS_ID = 'docker-hub-credentials'
+        CI_VENV = "/tmp/jenkins-venv-${env.BUILD_NUMBER}"
     }
 
     stages {
         stage('Checkout') {
             steps {
-                echo 'Obteniendo el código de la rama main...'
-                git branch: 'main', url: 'https://github.com/laserbix12/doceker.git'
+                echo 'Obteniendo el código configurado en Jenkins...'
+                checkout scm
             }
         }
 
         stage('Testing') {
-            agent {
-                docker {
-                    image 'python:3.11-slim'
-                    reuseNode true
-                }
-            }
             steps {
                 echo 'Instalando dependencias y ejecutando validaciones Django...'
                 sh '''
                     set -eu
-                    python --version
-                    python -m pip install --upgrade pip
-                    python -m pip install --no-cache-dir -r requirements.txt
-                    python manage.py check
-                    python manage.py test
+                    python3 --version
+                    python3 -m venv "${CI_VENV}"
+                    "${CI_VENV}/bin/python" -m pip install --upgrade pip
+                    "${CI_VENV}/bin/python" -m pip install --no-cache-dir -r requirements.txt
+                    "${CI_VENV}/bin/python" manage.py check
+                    "${CI_VENV}/bin/python" manage.py test
                 '''
             }
         }
@@ -82,6 +77,7 @@ pipeline {
 
     post {
         always {
+            sh 'rm -rf "${CI_VENV}"'
             echo 'Pipeline finalizado.'
         }
         success {
